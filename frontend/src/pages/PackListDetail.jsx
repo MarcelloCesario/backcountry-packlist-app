@@ -1,17 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { packlistService, gearService } from '../services/api';
+import { useSettings } from '../context/SettingsContext';
 import Modal from '../components/Modal';
 
 function PackListDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { formatWeight } = useSettings();
   const [packlist, setPacklist] = useState(null);
   const [analysis, setAnalysis] = useState(null);
   const [availableGear, setAvailableGear] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [searchGear, setSearchGear] = useState('');
 
   useEffect(() => {
     loadData();
@@ -19,15 +23,16 @@ function PackListDetail() {
 
   const loadData = async () => {
     try {
+      setError(null);
       const [packlistRes, gearRes] = await Promise.all([
         packlistService.getById(id),
         gearService.getAll()
       ]);
       setPacklist(packlistRes.packlist);
-      setAvailableGear(gearRes.items);
-    } catch (error) {
-      console.error('Failed to load data:', error);
-      navigate('/packlists');
+      setAvailableGear(gearRes.items || []);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+      setError('Failed to load pack list. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -38,8 +43,8 @@ function PackListDetail() {
       const res = await packlistService.analyze(id);
       setAnalysis(res.analysis);
       setShowAnalysis(true);
-    } catch (error) {
-      console.error('Failed to load analysis:', error);
+    } catch (err) {
+      console.error('Failed to load analysis:', err);
     }
   };
 
@@ -53,14 +58,6 @@ function PackListDetail() {
     await loadData();
   };
 
-  const formatWeight = (weight) => {
-    if (!weight) return '0 g';
-    if (weight >= 1000) {
-      return `${(weight / 1000).toFixed(2)} kg`;
-    }
-    return `${weight} g`;
-  };
-
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
     return new Date(dateStr).toLocaleDateString('en-US', {
@@ -72,9 +69,13 @@ function PackListDetail() {
 
   const totalWeight = packlist?.items?.reduce((sum, item) => sum + (item.weight || 0), 0) || 0;
 
-  const itemsNotInList = availableGear.filter(
-    gear => !packlist?.items?.some(item => item.id === gear.id)
-  );
+  const itemsNotInList = availableGear
+    .filter(gear => !packlist?.items?.some(item => item.id === gear.id))
+    .filter(gear =>
+      !searchGear ||
+      gear.name.toLowerCase().includes(searchGear.toLowerCase()) ||
+      (gear.category_name && gear.category_name.toLowerCase().includes(searchGear.toLowerCase()))
+    );
 
   const groupedItems = packlist?.items?.reduce((acc, item) => {
     const category = item.category_name || 'Uncategorized';
@@ -93,6 +94,27 @@ function PackListDetail() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="card bg-red-50 border-red-200">
+        <div className="flex items-center space-x-3">
+          <svg className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div>
+            <p className="text-red-800 font-medium">{error}</p>
+            <button
+              onClick={() => navigate('/packlists')}
+              className="text-red-600 hover:text-red-800 text-sm underline mt-1"
+            >
+              Back to Pack Lists
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!packlist) {
     return null;
   }
@@ -103,7 +125,7 @@ function PackListDetail() {
       <div className="mb-6">
         <button
           onClick={() => navigate('/packlists')}
-          className="text-mountain-600 hover:text-mountain-900 flex items-center mb-2"
+          className="text-mountain-600 hover:text-mountain-900 flex items-center mb-2 transition-colors"
         >
           <svg className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -156,21 +178,21 @@ function PackListDetail() {
             <div key={category} className="card">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-semibold text-mountain-900">{category}</h2>
-                <span className="text-sm text-mountain-600">
+                <span className="text-sm text-mountain-600 font-medium">
                   {formatWeight(items.reduce((sum, item) => sum + (item.weight || 0), 0))}
                 </span>
               </div>
               <div className="divide-y divide-mountain-100">
                 {items.map(item => (
                   <div key={item.id} className="py-3 flex items-center justify-between">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="font-medium text-mountain-900">{item.name}</p>
                       {item.notes && (
-                        <p className="text-sm text-mountain-500">{item.notes}</p>
+                        <p className="text-sm text-mountain-500 truncate">{item.notes}</p>
                       )}
                     </div>
-                    <div className="flex items-center space-x-4">
-                      <span className="text-sm text-mountain-600">{formatWeight(item.weight)}</span>
+                    <div className="flex items-center space-x-4 ml-4">
+                      <span className="text-sm text-mountain-600 font-medium">{formatWeight(item.weight)}</span>
                       <button
                         onClick={() => handleRemoveItem(item.id)}
                         className="p-1.5 text-mountain-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
@@ -203,15 +225,27 @@ function PackListDetail() {
       {/* Add Gear Modal */}
       <Modal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setSearchGear('');
+        }}
         title="Add Gear to Pack List"
       >
+        <div className="mb-4">
+          <input
+            type="text"
+            placeholder="Search gear..."
+            value={searchGear}
+            onChange={(e) => setSearchGear(e.target.value)}
+            className="input"
+          />
+        </div>
         {itemsNotInList.length > 0 ? (
-          <div className="max-h-96 overflow-y-auto">
+          <div className="max-h-96 overflow-y-auto -mx-6 px-6">
             <div className="divide-y divide-mountain-100">
               {itemsNotInList.map(item => (
                 <div key={item.id} className="py-3 flex items-center justify-between">
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-medium text-mountain-900">{item.name}</p>
                     <div className="flex items-center space-x-2 mt-1">
                       {item.category_name && (
@@ -222,7 +256,7 @@ function PackListDetail() {
                   </div>
                   <button
                     onClick={() => handleAddItem(item.id)}
-                    className="btn btn-primary text-sm"
+                    className="btn btn-primary text-sm ml-4"
                   >
                     Add
                   </button>
@@ -230,9 +264,13 @@ function PackListDetail() {
               ))}
             </div>
           </div>
-        ) : (
+        ) : availableGear.length === packlist.items?.length ? (
           <p className="text-center text-mountain-600 py-4">
             All your gear is already in this pack list
+          </p>
+        ) : (
+          <p className="text-center text-mountain-600 py-4">
+            No matching gear found
           </p>
         )}
       </Modal>
@@ -246,9 +284,9 @@ function PackListDetail() {
         {analysis && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-mountain-50 rounded-lg p-4">
-                <p className="text-sm text-mountain-600">Total Weight</p>
-                <p className="text-xl font-bold text-mountain-900">{formatWeight(analysis.totalWeight)}</p>
+              <div className="bg-primary-50 rounded-lg p-4">
+                <p className="text-sm text-primary-700">Total Weight</p>
+                <p className="text-xl font-bold text-primary-900">{formatWeight(analysis.totalWeight)}</p>
               </div>
               <div className="bg-mountain-50 rounded-lg p-4">
                 <p className="text-sm text-mountain-600">Total Items</p>
@@ -258,16 +296,29 @@ function PackListDetail() {
 
             <div>
               <h4 className="font-medium text-mountain-900 mb-3">Weight by Category</h4>
-              <div className="space-y-2">
-                {analysis.categoryBreakdown.map((cat, idx) => (
-                  <div key={idx} className="flex items-center justify-between">
-                    <span className="text-mountain-700">{cat.category || 'Uncategorized'}</span>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm text-mountain-500">{cat.item_count} items</span>
-                      <span className="font-medium text-mountain-900">{formatWeight(parseFloat(cat.category_weight))}</span>
+              <div className="space-y-3">
+                {analysis.categoryBreakdown.map((cat, idx) => {
+                  const percentage = analysis.totalWeight > 0
+                    ? (parseFloat(cat.category_weight) / analysis.totalWeight) * 100
+                    : 0;
+                  return (
+                    <div key={idx}>
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <span className="text-mountain-700">{cat.category || 'Uncategorized'}</span>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-mountain-500">{cat.item_count} items</span>
+                          <span className="font-medium text-mountain-900">{formatWeight(parseFloat(cat.category_weight))}</span>
+                        </div>
+                      </div>
+                      <div className="h-2 bg-mountain-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary-500 rounded-full transition-all duration-500"
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -276,7 +327,7 @@ function PackListDetail() {
                 <h4 className="font-medium text-mountain-900 mb-3">Heaviest Items</h4>
                 <div className="space-y-2">
                   {analysis.heaviestItems.map((item, idx) => (
-                    <div key={idx} className="flex items-center justify-between">
+                    <div key={idx} className="flex items-center justify-between bg-mountain-50 rounded-lg p-3">
                       <span className="text-mountain-700">{item.name}</span>
                       <span className="font-medium text-mountain-900">{formatWeight(item.weight)}</span>
                     </div>

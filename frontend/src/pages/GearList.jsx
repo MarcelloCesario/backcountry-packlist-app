@@ -1,16 +1,21 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { gearService, categoryService } from '../services/api';
+import { useSettings } from '../context/SettingsContext';
 import Modal from '../components/Modal';
 import GearItemCard from '../components/GearItemCard';
 import GearForm from '../components/GearForm';
 
 function GearList() {
+  const { formatWeight } = useSettings();
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [activityTypes, setActivityTypes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
-  const [filter, setFilter] = useState({ category: '', search: '' });
+  const [filter, setFilter] = useState({ category: '', activityType: '', search: '', wishlistOnly: false });
 
   useEffect(() => {
     loadData();
@@ -18,14 +23,18 @@ function GearList() {
 
   const loadData = async () => {
     try {
-      const [gearRes, catRes] = await Promise.all([
+      setError(null);
+      const [gearRes, catRes, typesRes] = await Promise.all([
         gearService.getAll(),
-        categoryService.getAll()
+        categoryService.getAll(),
+        categoryService.getActivityTypes()
       ]);
-      setItems(gearRes.items);
-      setCategories(catRes.categories);
-    } catch (error) {
-      console.error('Failed to load data:', error);
+      setItems(gearRes.items || []);
+      setCategories(catRes.categories || []);
+      setActivityTypes(typesRes.activityTypes || []);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+      setError('Failed to load gear data. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -66,15 +75,27 @@ function GearList() {
     setIsModalOpen(true);
   };
 
+  const clearFilters = () => {
+    setFilter({ category: '', activityType: '', search: '', wishlistOnly: false });
+  };
+
+  // Filter categories by activity type
+  const filteredCategories = filter.activityType
+    ? categories.filter(cat => cat.activity_type === filter.activityType)
+    : categories;
+
   const filteredItems = items.filter(item => {
     const matchesCategory = !filter.category || item.category_id === parseInt(filter.category);
+    const matchesActivityType = !filter.activityType || item.activity_type === filter.activityType;
     const matchesSearch = !filter.search ||
       item.name.toLowerCase().includes(filter.search.toLowerCase()) ||
       (item.notes && item.notes.toLowerCase().includes(filter.search.toLowerCase()));
-    return matchesCategory && matchesSearch;
+    const matchesWishlist = !filter.wishlistOnly || item.in_wishlist;
+    return matchesCategory && matchesActivityType && matchesSearch && matchesWishlist;
   });
 
   const totalWeight = filteredItems.reduce((sum, item) => sum + (item.weight || 0), 0);
+  const hasActiveFilters = filter.category || filter.activityType || filter.search || filter.wishlistOnly;
 
   if (loading) {
     return (
@@ -84,45 +105,104 @@ function GearList() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="card bg-red-50 border-red-200">
+        <div className="flex items-center space-x-3">
+          <svg className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div>
+            <p className="text-red-800 font-medium">{error}</p>
+            <button
+              onClick={loadData}
+              className="text-red-600 hover:text-red-800 text-sm underline mt-1"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-mountain-900">Gear Inventory</h1>
           <p className="text-mountain-600 mt-1">
-            {filteredItems.length} items | Total weight: {totalWeight >= 1000 ? `${(totalWeight / 1000).toFixed(2)} kg` : `${totalWeight} g`}
+            {filteredItems.length} {filteredItems.length === 1 ? 'item' : 'items'}
+            {hasActiveFilters && ` (filtered from ${items.length})`}
+            {' '} | Total: {formatWeight(totalWeight)}
           </p>
         </div>
-        <button onClick={openCreateModal} className="btn btn-primary">
+        <button onClick={openCreateModal} className="btn btn-primary whitespace-nowrap">
           Add Gear
         </button>
       </div>
 
       {/* Filters */}
       <div className="card mb-6">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1">
-            <input
-              type="text"
-              placeholder="Search gear..."
-              value={filter.search}
-              onChange={(e) => setFilter({ ...filter, search: e.target.value })}
-              className="input"
-            />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-mountain-700 mb-1">Search</label>
+              <input
+                type="text"
+                placeholder="Search gear..."
+                value={filter.search}
+                onChange={(e) => setFilter({ ...filter, search: e.target.value })}
+                className="input"
+              />
+            </div>
+            <div className="w-full md:w-48">
+              <label className="block text-sm font-medium text-mountain-700 mb-1">Activity Type</label>
+              <select
+                value={filter.activityType}
+                onChange={(e) => setFilter({ ...filter, activityType: e.target.value, category: '' })}
+                className="input"
+              >
+                <option value="">All Activities</option>
+                {activityTypes.map(type => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </div>
+            <div className="w-full md:w-56">
+              <label className="block text-sm font-medium text-mountain-700 mb-1">Category</label>
+              <select
+                value={filter.category}
+                onChange={(e) => setFilter({ ...filter, category: e.target.value })}
+                className="input"
+              >
+                <option value="">All Categories</option>
+                {filteredCategories.map(cat => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div className="w-full md:w-64">
-            <select
-              value={filter.category}
-              onChange={(e) => setFilter({ ...filter, category: e.target.value })}
-              className="input"
-            >
-              <option value="">All Categories</option>
-              {categories.map(cat => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name} ({cat.activity_type})
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center justify-between">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filter.wishlistOnly}
+                onChange={(e) => setFilter({ ...filter, wishlistOnly: e.target.checked })}
+                className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-mountain-300 rounded"
+              />
+              <span className="text-sm text-mountain-700">Wishlist items only</span>
+            </label>
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -147,11 +227,15 @@ function GearList() {
           </svg>
           <h3 className="mt-4 text-lg font-medium text-mountain-900">No gear found</h3>
           <p className="mt-2 text-mountain-600">
-            {filter.search || filter.category
+            {hasActiveFilters
               ? 'Try adjusting your filters'
               : 'Get started by adding your first piece of gear'}
           </p>
-          {!filter.search && !filter.category && (
+          {hasActiveFilters ? (
+            <button onClick={clearFilters} className="btn btn-secondary mt-4">
+              Clear Filters
+            </button>
+          ) : (
             <button onClick={openCreateModal} className="btn btn-primary mt-4">
               Add Your First Gear
             </button>
