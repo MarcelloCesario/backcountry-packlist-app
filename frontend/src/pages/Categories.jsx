@@ -6,10 +6,12 @@ function Categories() {
   const [categories, setCategories] = useState([]);
   const [activityTypes, setActivityTypes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
-  const [formData, setFormData] = useState({ name: '', activityType: '' });
-  const [error, setError] = useState('');
+  const [formData, setFormData] = useState({ name: '', activityType: '', customActivityType: '' });
+  const [formError, setFormError] = useState('');
+  const [useCustomActivity, setUseCustomActivity] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -17,14 +19,16 @@ function Categories() {
 
   const loadData = async () => {
     try {
+      setError(null);
       const [catRes, typesRes] = await Promise.all([
         categoryService.getAll(),
         categoryService.getActivityTypes()
       ]);
-      setCategories(catRes.categories);
-      setActivityTypes(typesRes.activityTypes);
-    } catch (error) {
-      console.error('Failed to load data:', error);
+      setCategories(catRes.categories || []);
+      setActivityTypes(typesRes.activityTypes || []);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+      setError('Failed to load categories. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -32,58 +36,71 @@ function Categories() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
+    setFormError('');
 
     if (!formData.name.trim()) {
-      setError('Name is required');
+      setFormError('Name is required');
       return;
     }
 
-    if (!formData.activityType.trim()) {
-      setError('Activity type is required');
+    const activityType = useCustomActivity ? formData.customActivityType : formData.activityType;
+    if (!activityType.trim()) {
+      setFormError('Activity type is required');
       return;
     }
 
     try {
+      const data = { name: formData.name, activityType };
       if (editingCategory) {
-        await categoryService.update(editingCategory.id, formData);
+        await categoryService.update(editingCategory.id, data);
       } else {
-        await categoryService.create(formData);
+        await categoryService.create(data);
       }
       await loadData();
       closeModal();
     } catch (err) {
-      setError(err.message);
+      setFormError(err.message);
     }
   };
 
   const handleDelete = async (id) => {
     if (confirm('Are you sure you want to delete this category? Gear items in this category will be uncategorized.')) {
-      await categoryService.delete(id);
-      await loadData();
+      try {
+        await categoryService.delete(id);
+        await loadData();
+      } catch (err) {
+        console.error('Failed to delete category:', err);
+      }
     }
   };
 
   const openCreateModal = () => {
     setEditingCategory(null);
-    setFormData({ name: '', activityType: '' });
+    setFormData({ name: '', activityType: '', customActivityType: '' });
+    setUseCustomActivity(false);
+    setFormError('');
     setIsModalOpen(true);
   };
 
   const openEditModal = (category) => {
     setEditingCategory(category);
+    const isCustom = !activityTypes.includes(category.activity_type);
     setFormData({
       name: category.name || '',
-      activityType: category.activity_type || ''
+      activityType: isCustom ? '' : category.activity_type || '',
+      customActivityType: isCustom ? category.activity_type || '' : ''
     });
+    setUseCustomActivity(isCustom);
+    setFormError('');
     setIsModalOpen(true);
   };
 
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingCategory(null);
-    setFormData({ name: '', activityType: '' });
-    setError('');
+    setFormData({ name: '', activityType: '', customActivityType: '' });
+    setUseCustomActivity(false);
+    setFormError('');
   };
 
   const groupedCategories = categories.reduce((acc, cat) => {
@@ -103,12 +120,35 @@ function Categories() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="card bg-red-50 border-red-200">
+        <div className="flex items-center space-x-3">
+          <svg className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div>
+            <p className="text-red-800 font-medium">{error}</p>
+            <button
+              onClick={loadData}
+              className="text-red-600 hover:text-red-800 text-sm underline mt-1"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-mountain-900">Categories</h1>
-          <p className="text-mountain-600 mt-1">{categories.length} categories across {activityTypes.length} activity types</p>
+          <p className="text-mountain-600 mt-1">
+            {categories.length} {categories.length === 1 ? 'category' : 'categories'} across {Object.keys(groupedCategories).length} activity {Object.keys(groupedCategories).length === 1 ? 'type' : 'types'}
+          </p>
         </div>
         <button onClick={openCreateModal} className="btn btn-primary">
           Add Category
@@ -120,16 +160,16 @@ function Categories() {
           {Object.entries(groupedCategories).map(([activityType, cats]) => (
             <div key={activityType} className="card">
               <h2 className="text-lg font-semibold text-mountain-900 mb-4 capitalize">
-                {activityType.replace('_', ' ')}
+                {activityType.replace(/_/g, ' ')}
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {cats.map(category => (
                   <div
                     key={category.id}
-                    className="flex items-center justify-between p-3 bg-mountain-50 rounded-lg"
+                    className="flex items-center justify-between p-3 bg-mountain-50 rounded-lg group hover:bg-mountain-100 transition-colors"
                   >
                     <span className="font-medium text-mountain-900">{category.name}</span>
-                    <div className="flex items-center space-x-1">
+                    <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => openEditModal(category)}
                         className="p-1.5 text-mountain-400 hover:text-primary-600 hover:bg-white rounded transition-colors"
@@ -175,9 +215,9 @@ function Categories() {
         title={editingCategory ? 'Edit Category' : 'Create Category'}
       >
         <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
+          {formError && (
             <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm">
-              {error}
+              {formError}
             </div>
           )}
 
@@ -198,25 +238,47 @@ function Categories() {
             <label className="block text-sm font-medium text-mountain-700 mb-1">
               Activity Type *
             </label>
-            <div className="space-y-2">
-              <select
-                value={formData.activityType}
-                onChange={(e) => setFormData({ ...formData, activityType: e.target.value })}
-                className="input"
-              >
-                <option value="">Select or enter new</option>
-                {activityTypes.map(type => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
-              <input
-                type="text"
-                value={formData.activityType}
-                onChange={(e) => setFormData({ ...formData, activityType: e.target.value })}
-                className="input"
-                placeholder="Or enter a new activity type"
-              />
-            </div>
+            {!useCustomActivity ? (
+              <div className="space-y-2">
+                <select
+                  value={formData.activityType}
+                  onChange={(e) => setFormData({ ...formData, activityType: e.target.value })}
+                  className="input"
+                >
+                  <option value="">Select an activity type</option>
+                  {activityTypes.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setUseCustomActivity(true)}
+                  className="text-sm text-primary-600 hover:text-primary-700"
+                >
+                  + Create new activity type
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={formData.customActivityType}
+                  onChange={(e) => setFormData({ ...formData, customActivityType: e.target.value })}
+                  className="input"
+                  placeholder="Enter new activity type"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseCustomActivity(false);
+                    setFormData({ ...formData, customActivityType: '' });
+                  }}
+                  className="text-sm text-primary-600 hover:text-primary-700"
+                >
+                  Select from existing types
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end space-x-3 pt-4">

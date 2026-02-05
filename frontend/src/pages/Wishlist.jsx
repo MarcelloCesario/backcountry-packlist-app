@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { wishlistService, gearService, categoryService } from '../services/api';
+import { useSettings } from '../context/SettingsContext';
 import GearItemCard from '../components/GearItemCard';
 import Modal from '../components/Modal';
 import GearForm from '../components/GearForm';
 
 function Wishlist() {
+  const { formatWeight } = useSettings();
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
 
@@ -17,14 +21,16 @@ function Wishlist() {
 
   const loadData = async () => {
     try {
+      setError(null);
       const [wishlistRes, catRes] = await Promise.all([
         wishlistService.getAll(),
         categoryService.getAll()
       ]);
-      setItems(wishlistRes.items);
-      setCategories(catRes.categories);
-    } catch (error) {
-      console.error('Failed to load data:', error);
+      setItems(wishlistRes.items || []);
+      setCategories(catRes.categories || []);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+      setError('Failed to load wishlist. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -54,14 +60,33 @@ function Wishlist() {
     setIsModalOpen(true);
   };
 
-  const totalEstimatedCost = items.reduce((sum, item) => {
-    return sum;
-  }, 0);
+  const totalWeight = items.reduce((sum, item) => sum + (item.weight || 0), 0);
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="card bg-red-50 border-red-200">
+        <div className="flex items-center space-x-3">
+          <svg className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div>
+            <p className="text-red-800 font-medium">{error}</p>
+            <button
+              onClick={loadData}
+              className="text-red-600 hover:text-red-800 text-sm underline mt-1"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -72,9 +97,13 @@ function Wishlist() {
         <div>
           <h1 className="text-2xl font-bold text-mountain-900">Wishlist</h1>
           <p className="text-mountain-600 mt-1">
-            {items.length} items you want to buy
+            {items.length} {items.length === 1 ? 'item' : 'items'} you want to buy
+            {items.length > 0 && ` | Total: ${formatWeight(totalWeight)}`}
           </p>
         </div>
+        <Link to="/gear" className="btn btn-secondary">
+          Browse Gear
+        </Link>
       </div>
 
       {items.length > 0 ? (
@@ -98,6 +127,9 @@ function Wishlist() {
           <p className="mt-2 text-mountain-600">
             Star items from your gear inventory to add them to your wishlist
           </p>
+          <Link to="/gear" className="btn btn-primary mt-4 inline-block">
+            Browse Gear Inventory
+          </Link>
         </div>
       )}
 
